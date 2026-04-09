@@ -21,3 +21,12 @@ test('extractImageUrlFromMessage falls back to url field', () => {
     'https://files.example.com/photo-from-url.jpg',
   );
 });
+
+test('extractImageUrlFromMessage accepts photo_url field from zalo webhook', () => {
+  assert.equal(
+    extractImageUrlFromMessage({
+      photo_url: 'https://files.example.com/photo-from-photo-url.jpg',
+    }),
+    'https://files.example.com/photo-from-photo-url.jpg',
+  );
+});

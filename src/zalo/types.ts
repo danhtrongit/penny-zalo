@@ -29,6 +29,7 @@ export interface ZaloMessage {
   chat: ZaloChat;
   text?: string;
   photo?: string;
+  photo_url?: string;
   document?: string;
   caption?: string;
   sticker?: string;
