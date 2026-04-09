@@ -12,6 +12,7 @@ import logger from '../utils/logger.js';
 import { ZaloBotClient } from './client.js';
 import { registerZaloClient } from './registry.js';
 import type { ZaloEventPayload, ZaloMessage } from './types.js';
+import { extractWebhookEvent } from './webhook.js';
 import {
   clearPendingState,
   getPendingState,
@@ -204,9 +205,9 @@ export class PennyZaloRuntime {
       }
 
       try {
-        const body = req.body as { ok?: boolean; result?: ZaloEventPayload };
-        if (body?.result) {
-          await this.handleEvent(body.result);
+        const event = extractWebhookEvent(req.body);
+        if (event) {
+          await this.handleEvent(event);
         }
         res.json({ message: 'Success' });
       } catch (error) {
