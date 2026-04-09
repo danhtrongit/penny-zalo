@@ -13,6 +13,7 @@ import logger from '../utils/logger.js';
 import { createTransaction } from '../database/repositories/transaction.repo.js';
 import { formatCurrency } from '../utils/currency.js';
 import { CATEGORY_EMOJI, type Category } from '../types/index.js';
+import { normalizeImportedTransactionDate } from './importedDate.js';
 
 const ai = new GoogleGenAI({
   apiKey: config.ai.apiKey,
@@ -32,84 +33,6 @@ interface OCRResult {
   }>;
   totalAmount: number;
   message: string;
-}
-
-/**
- * Parse a date string from OCR, handling 2-digit years correctly.
- * Returns an ISO string. Falls back to current date if unparseable.
- *
- * Common bill date formats:
- * - "2014-03-13" (Gemini YYYY-MM-DD)
- * - "13.03.14" (dd.mm.yy on receipt)
- * - "13/03/2014"
- */
-function parseReceiptDate(dateStr: string | null | undefined): string {
-  if (!dateStr) return new Date().toISOString();
-
-  try {
-    // Try standard YYYY-MM-DD first
-    const isoMatch = dateStr.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-    if (isoMatch) {
-      const year = parseInt(isoMatch[1], 10);
-      const month = parseInt(isoMatch[2], 10);
-      const day = parseInt(isoMatch[3], 10);
-      return buildSafeDate(year, month, day);
-    }
-
-    // Try dd.mm.yy or dd/mm/yy or dd-mm-yy
-    const dmyShort = dateStr.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2})$/);
-    if (dmyShort) {
-      const day = parseInt(dmyShort[1], 10);
-      const month = parseInt(dmyShort[2], 10);
-      let year = parseInt(dmyShort[3], 10);
-      // Convert 2-digit year: 00-99 → 2000-2099, then cap at current year
-      year = 2000 + year;
-      return buildSafeDate(year, month, day);
-    }
-
-    // Try dd.mm.yyyy or dd/mm/yyyy
-    const dmyLong = dateStr.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
-    if (dmyLong) {
-      const day = parseInt(dmyLong[1], 10);
-      const month = parseInt(dmyLong[2], 10);
-      const year = parseInt(dmyLong[3], 10);
-      return buildSafeDate(year, month, day);
-    }
-
-    // Fallback: try native Date parsing
-    const fallback = new Date(dateStr);
-    if (!isNaN(fallback.getTime())) {
-      return capDateAtCurrentYear(fallback).toISOString();
-    }
-  } catch (e) {
-    logger.warn(`⚠️ Could not parse receipt date: "${dateStr}"`);
-  }
-
-  return new Date().toISOString();
-}
-
-/**
- * Build a safe Date from year/month/day, ensuring it doesn't exceed current year.
- */
-function buildSafeDate(year: number, month: number, day: number): string {
-  const currentYear = new Date().getFullYear();
-  // If year is in the future, use current year instead
-  if (year > currentYear) {
-    year = currentYear;
-  }
-  const date = new Date(year, month - 1, day);
-  return date.toISOString();
-}
-
-/**
- * Cap a date at the current year. If the date is in the future, reset year to current.
- */
-function capDateAtCurrentYear(date: Date): Date {
-  const currentYear = new Date().getFullYear();
-  if (date.getFullYear() > currentYear) {
-    date.setFullYear(currentYear);
-  }
-  return date;
 }
 
 /**
@@ -205,7 +128,7 @@ export async function processReceiptImage(
       const itemsSummary = bill.items.map((i: any) => i.description).join(', ');
       const description = `${storeName}: ${itemsSummary}`;
       const mainCategory = bill.items[0]?.category || 'Khác';
-      const txDate = parseReceiptDate(bill.date);
+      const txDate = normalizeImportedTransactionDate(bill.date);
 
       // Save as ONE transaction per bill
       const tx = await createTransaction({

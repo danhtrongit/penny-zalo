@@ -12,6 +12,7 @@ import logger from '../utils/logger.js';
 import { createTransaction } from '../database/repositories/transaction.repo.js';
 import { formatCurrency } from '../utils/currency.js';
 import { CATEGORY_EMOJI, type Category } from '../types/index.js';
+import { normalizeImportedTransactionDate } from './importedDate.js';
 
 const ai = new GoogleGenAI({
   apiKey: config.ai.apiKey,
@@ -101,7 +102,7 @@ export async function processPDF(
     let totalAmount = 0;
 
     for (const item of parsed.items) {
-      const txDate = item.date ? new Date(item.date).toISOString() : new Date().toISOString();
+      const txDate = normalizeImportedTransactionDate(item.date);
 
       await createTransaction({
         userId,
