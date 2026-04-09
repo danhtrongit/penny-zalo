@@ -269,6 +269,7 @@ export class PennyZaloRuntime {
     }
 
     if (event.event_name === 'message.unsupported.received') {
+      logger.warn(`⚠️ Unsupported Zalo event payload: ${JSON.stringify(event)}`);
       const pdfUrl = extractPdfUrlFromMessage(message);
       if (pdfUrl) {
         await this.handlePdfMessage(message, undefined, pdfUrl);

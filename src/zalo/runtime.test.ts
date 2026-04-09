@@ -88,3 +88,43 @@ test('PennyZaloRuntime routes unsupported events with image payload to image han
 
   assert.equal(handled, 1);
 });
+
+test('PennyZaloRuntime falls back to generic unsupported reply when unsupported event has no media payload', async () => {
+  process.env.ZALO_BOT_TOKEN ||= 'test-token';
+  process.env.AI_API_KEY ||= 'test-key';
+  process.env.AI_BASE_URL ||= 'https://example.com';
+  process.env.DATABASE_URL ||= 'mysql://user:pass@127.0.0.1:3306/penny_test';
+
+  const { PennyZaloRuntime } = await import('./runtime.js');
+
+  const client = {
+    sendMessage: async () => undefined,
+    sendChatAction: async () => undefined,
+  } as any;
+
+  const runtime = new PennyZaloRuntime(client);
+  let replyText = '';
+
+  runtime['reply'] = async (_chatId: string, text: string) => {
+    replyText = text;
+  };
+
+  await runtime['handleEvent']({
+    event_name: 'message.unsupported.received',
+    message: {
+      from: {
+        id: 'user-3',
+        display_name: 'Ted',
+        is_bot: false,
+      },
+      chat: {
+        id: 'chat-3',
+        chat_type: 'PRIVATE',
+      },
+      message_id: 'msg-unsupported-plain-1',
+      date: 3,
+    },
+  } as any);
+
+  assert.match(replyText, /text, ảnh và PDF/i);
+});
