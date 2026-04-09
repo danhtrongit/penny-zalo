@@ -20,6 +20,43 @@ export interface SaveResult {
   duplicateAmount?: number;
 }
 
+function normalizeDuplicateText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function shouldFlagDuplicateExpense(
+  current: { amount: number; description: string; category?: string },
+  recentTransactions: Array<{ amount: number; description: string; category?: string }>,
+): boolean {
+  const currentDescription = normalizeDuplicateText(current.description);
+  if (!currentDescription) {
+    return false;
+  }
+
+  return recentTransactions.some((tx) => {
+    if (tx.amount !== current.amount) {
+      return false;
+    }
+
+    const existingDescription = normalizeDuplicateText(tx.description);
+    if (!existingDescription) {
+      return false;
+    }
+
+    return (
+      existingDescription === currentDescription ||
+      existingDescription.includes(currentDescription) ||
+      currentDescription.includes(existingDescription)
+    );
+  });
+}
+
 /**
  * Save parsed expenses to database
  */
@@ -36,7 +73,7 @@ export async function saveExpenses(
     // Check for duplicates (only for single items)
     if (parsed.items.length === 1) {
       const recent = await txRepo.getRecentSameAmount(userId, item.amount, 10);
-      if (recent.length > 0) {
+      if (shouldFlagDuplicateExpense(item, recent)) {
         hasDuplicate = true;
         duplicateAmount = item.amount;
         // Don't save yet — let the handler ask for confirmation
