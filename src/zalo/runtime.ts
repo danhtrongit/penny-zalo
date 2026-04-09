@@ -47,6 +47,7 @@ import { broadcastAIPersonalized, broadcastImage, broadcastText } from '../servi
 import type { BudgetPeriod, Category, DetectedIntent, PersonaPreset } from '../types/index.js';
 import { CATEGORY_EMOJI } from '../types/index.js';
 import { extractPdfUrlFromMessage, isLikelyPdfSource } from './pdfMessage.js';
+import { extractImageUrlFromMessage } from './imageMessage.js';
 
 type DbUser = NonNullable<Awaited<ReturnType<typeof findOrCreateZaloUser>>>;
 
@@ -251,6 +252,17 @@ export class PennyZaloRuntime {
     processedEvents.set(dedupeKey, Date.now());
     this.cleanupProcessedEvents();
 
+    if (
+      event.event_name === 'message.image.received' ||
+      event.event_name === 'message.document.received' ||
+      event.event_name === 'message.file.received' ||
+      event.event_name === 'message.pdf.received'
+    ) {
+      logger.info(
+        `📥 Zalo media event ${event.event_name} keys=${Object.keys(message).join(',')} photo=${Boolean(message.photo)} document=${Boolean(message.document)} url=${Boolean(message.url)} mime=${message.mime_type || '-'} file=${message.file_name || '-'}`,
+      );
+    }
+
     switch (event.event_name) {
       case 'message.text.received':
         await this.handleTextMessage(message);
@@ -335,12 +347,13 @@ export class PennyZaloRuntime {
         return;
       }
 
-      if (!message.photo) {
+      const imageUrl = extractImageUrlFromMessage(message);
+      if (!imageUrl) {
         await this.reply(message.chat.id, '❌ Ảnh không hợp lệ.');
         return;
       }
 
-      const response = await fetch(message.photo);
+      const response = await fetch(imageUrl);
       const buffer = Buffer.from(await response.arrayBuffer());
       const caption = message.caption || undefined;
       const result = await broadcastImage(buffer, caption);
@@ -351,7 +364,11 @@ export class PennyZaloRuntime {
       return;
     }
 
-    if (!message.photo) {
+    const imageUrl = extractImageUrlFromMessage(message);
+    if (!imageUrl) {
+      logger.warn(
+        `⚠️ Image event missing image URL. keys=${Object.keys(message).join(',')} mime=${message.mime_type || '-'} file=${message.file_name || '-'}`,
+      );
       await this.reply(message.chat.id, '😅 Mình chưa đọc được ảnh này.');
       return;
     }
@@ -359,7 +376,7 @@ export class PennyZaloRuntime {
     await this.client.sendChatAction(message.chat.id, 'typing').catch(() => {});
 
     try {
-      const response = await fetch(message.photo);
+      const response = await fetch(imageUrl);
       const buffer = Buffer.from(await response.arrayBuffer());
       const contentType = response.headers.get('content-type') || 'image/jpeg';
 
