@@ -13,6 +13,7 @@ import { createTransaction } from '../database/repositories/transaction.repo.js'
 import { formatCurrency } from '../utils/currency.js';
 import { CATEGORY_EMOJI, type Category } from '../types/index.js';
 import { normalizeImportedTransactionDate } from './importedDate.js';
+import { detectImportedMediaDuplicate } from './mediaImport.js';
 
 const ai = new GoogleGenAI({
   apiKey: config.ai.apiKey,
@@ -39,6 +40,15 @@ export async function processPDF(
   logger.info('📄 Processing PDF...');
 
   try {
+    const duplicateCheck = await detectImportedMediaDuplicate(userId, pdfBuffer);
+    if (duplicateCheck.existing) {
+      return {
+        success: false,
+        message: '📎 File PDF này đã được lưu trước đó rồi, mình không lưu trùng nữa.',
+        totalAmount: 0,
+      };
+    }
+
     // Dynamic import pdf-parse (CommonJS module)
     const pdfParseModule = await import('pdf-parse') as any;
     const pdfParse = pdfParseModule.default || pdfParseModule;
@@ -112,6 +122,7 @@ export async function processPDF(
         rawInput: '[PDF]',
         source: 'pdf',
         mediaPath: mediaPath || '',
+        mediaHash: duplicateCheck.mediaHash,
         transactionDate: txDate,
       });
 

@@ -17,6 +17,7 @@ export interface CreateTransactionData {
   rawInput?: string;
   source?: TransactionSource;
   mediaPath?: string;
+  mediaHash?: string;
   transactionDate?: string;
   status?: string;
 }
@@ -35,6 +36,7 @@ export async function createTransaction(data: CreateTransactionData) {
       rawInput: data.rawInput || '',
       source: data.source || 'text',
       mediaPath: data.mediaPath || '',
+      mediaHash: data.mediaHash || null,
       transactionDate: data.transactionDate ? new Date(data.transactionDate) : new Date(),
       status: data.status || 'confirmed',
     });
@@ -66,6 +68,7 @@ export async function createTransactions(items: CreateTransactionData[]) {
         rawInput: data.rawInput || '',
         source: data.source || 'text',
         mediaPath: data.mediaPath || '',
+        mediaHash: data.mediaHash || null,
         transactionDate: data.transactionDate ? new Date(data.transactionDate) : new Date(),
         status: data.status || 'confirmed',
       }))
@@ -250,5 +253,19 @@ export async function getTransactionsWithMedia(userId: number, limit = 20) {
       )
     )
     .orderBy(desc(transactions.transactionDate))
+    .limit(limit);
+}
+
+export async function getTransactionsByMediaHash(userId: number, mediaHash: string, limit = 20) {
+  return db
+    .select()
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.userId, userId),
+        eq(transactions.mediaHash, mediaHash),
+      )
+    )
+    .orderBy(desc(transactions.id))
     .limit(limit);
 }

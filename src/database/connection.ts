@@ -81,6 +81,19 @@ async function ensureUniqueIndex(
   await conn.query(`CREATE UNIQUE INDEX \`${indexName}\` ON \`${table}\` (${expression})`);
 }
 
+async function ensureIndex(
+  conn: mysql.PoolConnection,
+  table: string,
+  indexName: string,
+  expression: string,
+): Promise<void> {
+  if (await hasIndex(conn, table, indexName)) {
+    return;
+  }
+
+  await conn.query(`CREATE INDEX \`${indexName}\` ON \`${table}\` (${expression})`);
+}
+
 /**
  * Initialize database tables (run on startup)
  */
@@ -195,9 +208,11 @@ export async function initDatabase(): Promise<void> {
 
     await ensureColumn(conn, 'users', 'zalo_user_id', 'zalo_user_id VARCHAR(255) NULL AFTER telegram_id');
     await ensureColumn(conn, 'users', 'zalo_chat_id', 'zalo_chat_id VARCHAR(255) NULL AFTER zalo_user_id');
+    await ensureColumn(conn, 'transactions', 'media_hash', 'media_hash VARCHAR(64) NULL AFTER media_path');
 
     await ensureUniqueIndex(conn, 'users', 'uk_users_zalo_user_id', '`zalo_user_id`');
     await ensureUniqueIndex(conn, 'users', 'uk_users_zalo_chat_id', '`zalo_chat_id`');
+    await ensureIndex(conn, 'transactions', 'idx_transactions_user_media_hash', '`user_id`, `media_hash`');
 
     logger.info('✅ MySQL database initialized successfully');
   } finally {

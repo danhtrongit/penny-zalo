@@ -33,6 +33,7 @@ export const transactions = mysqlTable('transactions', {
   rawInput: text('raw_input'),
   source: varchar('source', { length: 20 }).notNull().default('text'), // text | image | pdf
   mediaPath: text('media_path'), // path to original receipt file
+  mediaHash: varchar('media_hash', { length: 64 }),
   transactionDate: datetime('transaction_date').notNull().default(sql`NOW()`),
   status: varchar('status', { length: 20 }).notNull().default('confirmed'), // confirmed | pending
   createdAt: datetime('created_at').notNull().default(sql`NOW()`),

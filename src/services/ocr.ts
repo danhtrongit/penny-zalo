@@ -14,6 +14,7 @@ import { createTransaction } from '../database/repositories/transaction.repo.js'
 import { formatCurrency } from '../utils/currency.js';
 import { CATEGORY_EMOJI, type Category } from '../types/index.js';
 import { normalizeImportedTransactionDate } from './importedDate.js';
+import { detectImportedMediaDuplicate } from './mediaImport.js';
 
 const ai = new GoogleGenAI({
   apiKey: config.ai.apiKey,
@@ -48,6 +49,16 @@ export async function processReceiptImage(
   logger.info('📸 Processing receipt image...');
 
   try {
+    const duplicateCheck = await detectImportedMediaDuplicate(userId, imageBuffer);
+    if (duplicateCheck.existing) {
+      return {
+        success: false,
+        transactions: [],
+        totalAmount: 0,
+        message: '📎 Ảnh hóa đơn này đã được lưu trước đó rồi, mình không lưu trùng nữa.',
+      };
+    }
+
     const response = await ai.models.generateContent({
       model: config.ai.model,
       contents: [
@@ -139,6 +150,7 @@ export async function processReceiptImage(
         rawInput: `[ảnh hóa đơn: ${storeName}]`,
         source: 'image',
         mediaPath: mediaPath || '',
+        mediaHash: duplicateCheck.mediaHash,
         transactionDate: txDate,
       });
 
