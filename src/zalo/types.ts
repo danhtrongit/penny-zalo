@@ -7,6 +7,9 @@
 export type ZaloEventName =
   | 'message.text.received'
   | 'message.image.received'
+  | 'message.document.received'
+  | 'message.file.received'
+  | 'message.pdf.received'
   | 'message.sticker.received'
   | 'message.unsupported.received';
 
@@ -26,9 +29,12 @@ export interface ZaloMessage {
   chat: ZaloChat;
   text?: string;
   photo?: string;
+  document?: string;
   caption?: string;
   sticker?: string;
   url?: string;
+  mime_type?: string;
+  file_name?: string;
   message_id: string;
   date: number;
 }
