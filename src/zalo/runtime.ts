@@ -252,6 +252,11 @@ export class PennyZaloRuntime {
     processedEvents.set(dedupeKey, Date.now());
     this.cleanupProcessedEvents();
 
+    const messageType = (message as ZaloMessage & { message_type?: string }).message_type || '-';
+    logger.info(
+      `📨 Zalo event ${event.event_name} keys=${Object.keys(message).join(',')} messageType=${messageType}`,
+    );
+
     if (
       event.event_name === 'message.image.received' ||
       event.event_name === 'message.document.received' ||
@@ -261,6 +266,19 @@ export class PennyZaloRuntime {
       logger.info(
         `📥 Zalo media event ${event.event_name} keys=${Object.keys(message).join(',')} photo=${Boolean(message.photo)} document=${Boolean(message.document)} url=${Boolean(message.url)} mime=${message.mime_type || '-'} file=${message.file_name || '-'}`,
       );
+    }
+
+    if (event.event_name === 'message.unsupported.received') {
+      const pdfUrl = extractPdfUrlFromMessage(message);
+      if (pdfUrl) {
+        await this.handlePdfMessage(message, undefined, pdfUrl);
+        return;
+      }
+
+      if (extractImageUrlFromMessage(message)) {
+        await this.handleImageMessage(message);
+        return;
+      }
     }
 
     switch (event.event_name) {
