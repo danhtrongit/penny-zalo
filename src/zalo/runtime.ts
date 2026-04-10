@@ -48,11 +48,13 @@ import type { BudgetPeriod, Category, DetectedIntent, PersonaPreset } from '../t
 import { CATEGORY_EMOJI } from '../types/index.js';
 import { extractPdfUrlFromMessage, isLikelyPdfSource } from './pdfMessage.js';
 import { extractImageUrlFromMessage } from './imageMessage.js';
+import { RequestBusyGuard } from './requestBusyGuard.js';
 
 type DbUser = NonNullable<Awaited<ReturnType<typeof findOrCreateZaloUser>>>;
 
 const PENDING_TTL_MS = 15 * 60 * 1000;
 const processedEvents = new Map<string, number>();
+const AI_BUSY_REPLY = '⏳ Mình đang xử lý tin trước đó. Chờ mình trả lời xong rồi gửi tiếp nhé.';
 
 const PRESET_LABELS: Record<PersonaPreset, string> = {
   'bạn thân': '👫 Bạn thân',
@@ -167,6 +169,7 @@ function buildPublicMediaUrl(relativePath: string): string | null {
 
 export class PennyZaloRuntime {
   private polling = false;
+  private readonly aiRequestGuard = new RequestBusyGuard<string>();
 
   constructor(private readonly client: ZaloBotClient) {
     registerZaloClient(client);
@@ -329,8 +332,17 @@ export class PennyZaloRuntime {
     const user = existingUser || await this.requireUser(message);
 
     if (text.startsWith('/')) {
-      const handled = await this.handleCommand(user, message, text);
+      const handled = this.isExclusiveAiCommand(text)
+        ? await this.runExclusiveRequestTask<boolean>(
+            message.from.id,
+            message.chat.id,
+            async () => await this.handleCommand(user, message, text),
+          )
+        : await this.handleCommand(user, message, text);
       if (handled) {
+        return;
+      }
+      if (handled === null) {
         return;
       }
     }
@@ -351,7 +363,14 @@ export class PennyZaloRuntime {
       return;
     }
 
-    await this.handleIntentText(user, message, text);
+    const handled = await this.runExclusiveRequestTask<void>(
+      message.from.id,
+      message.chat.id,
+      async () => await this.handleIntentText(user, message, text),
+    );
+    if (handled === null) {
+      return;
+    }
   }
 
   private async handleImageMessage(message: ZaloMessage): Promise<void> {
@@ -392,20 +411,25 @@ export class PennyZaloRuntime {
       return;
     }
 
-    await this.client.sendChatAction(message.chat.id, 'typing').catch(() => {});
+    const handled = await this.runExclusiveRequestTask<void>(message.from.id, message.chat.id, async () => {
+      await this.client.sendChatAction(message.chat.id, 'typing').catch(() => {});
 
-    try {
-      const response = await fetch(imageUrl);
-      const buffer = Buffer.from(await response.arrayBuffer());
-      const contentType = response.headers.get('content-type') || 'image/jpeg';
+      try {
+        const response = await fetch(imageUrl);
+        const buffer = Buffer.from(await response.arrayBuffer());
+        const contentType = response.headers.get('content-type') || 'image/jpeg';
 
-      const mediaPath = await this.saveIncomingImage(buffer, user.id, contentType);
-      const result = await processReceiptImage(buffer, contentType, user.id, mediaPath);
+        const mediaPath = await this.saveIncomingImage(buffer, user.id, contentType);
+        const result = await processReceiptImage(buffer, contentType, user.id, mediaPath);
 
-      await this.reply(message.chat.id, stripMarkdown(result.message));
-    } catch (error) {
-      logger.error(`Photo handler error: ${(error as Error).message}`);
-      await this.reply(message.chat.id, '😅 Có lỗi khi xử lý ảnh. Bạn thử gửi lại hoặc nhập bằng text nhé!');
+        await this.reply(message.chat.id, stripMarkdown(result.message));
+      } catch (error) {
+        logger.error(`Photo handler error: ${(error as Error).message}`);
+        await this.reply(message.chat.id, '😅 Có lỗi khi xử lý ảnh. Bạn thử gửi lại hoặc nhập bằng text nhé!');
+      }
+    });
+    if (handled === null) {
+      return;
     }
   }
 
@@ -425,38 +449,63 @@ export class PennyZaloRuntime {
       return;
     }
 
-    await this.client.sendChatAction(message.chat.id, 'typing').catch(() => {});
+    const handled = await this.runExclusiveRequestTask<void>(message.from.id, message.chat.id, async () => {
+      await this.client.sendChatAction(message.chat.id, 'typing').catch(() => {});
 
-    try {
-      const response = await fetch(pdfUrl);
-      if (!response.ok) {
-        throw new Error(`Download failed with status ${response.status}`);
+      try {
+        const response = await fetch(pdfUrl);
+        if (!response.ok) {
+          throw new Error(`Download failed with status ${response.status}`);
+        }
+
+        const contentType = response.headers.get('content-type');
+        const fileName = message.file_name || this.getFilenameFromUrl(pdfUrl);
+
+        if (!isLikelyPdfSource({
+          contentType,
+          fileName,
+          sourceUrl: pdfUrl,
+          mimeType: message.mime_type,
+        })) {
+          await this.reply(
+            message.chat.id,
+            '📄 Link/file này chưa có dấu hiệu là PDF hợp lệ. Bạn thử gửi lại PDF hoặc dùng /login nhé.',
+          );
+          return;
+        }
+
+        const buffer = Buffer.from(await response.arrayBuffer());
+        const mediaPath = await this.saveIncomingPdf(buffer, user.id);
+        const result = await processPDF(buffer, user.id, mediaPath);
+        await this.reply(message.chat.id, stripMarkdown(result.message));
+      } catch (error) {
+        logger.error(`PDF handler error: ${(error as Error).message}`);
+        await this.reply(message.chat.id, '😅 Có lỗi khi tải hoặc đọc file PDF. Bạn thử gửi lại hoặc dùng /login nhé!');
       }
-
-      const contentType = response.headers.get('content-type');
-      const fileName = message.file_name || this.getFilenameFromUrl(pdfUrl);
-
-      if (!isLikelyPdfSource({
-        contentType,
-        fileName,
-        sourceUrl: pdfUrl,
-        mimeType: message.mime_type,
-      })) {
-        await this.reply(
-          message.chat.id,
-          '📄 Link/file này chưa có dấu hiệu là PDF hợp lệ. Bạn thử gửi lại PDF hoặc dùng /login nhé.',
-        );
-        return;
-      }
-
-      const buffer = Buffer.from(await response.arrayBuffer());
-      const mediaPath = await this.saveIncomingPdf(buffer, user.id);
-      const result = await processPDF(buffer, user.id, mediaPath);
-      await this.reply(message.chat.id, stripMarkdown(result.message));
-    } catch (error) {
-      logger.error(`PDF handler error: ${(error as Error).message}`);
-      await this.reply(message.chat.id, '😅 Có lỗi khi tải hoặc đọc file PDF. Bạn thử gửi lại hoặc dùng /login nhé!');
+    });
+    if (handled === null) {
+      return;
     }
+  }
+
+  private isExclusiveAiCommand(text: string): boolean {
+    const [command] = text.split(/\s+/, 1);
+    return ['/report', '/broadcastai'].includes(command.toLowerCase());
+  }
+
+  private async runExclusiveRequestTask<T>(
+    requestKey: string,
+    chatId: string,
+    task: () => Promise<T>,
+  ): Promise<T | null> {
+    return await this.aiRequestGuard.run<T | null>(
+      requestKey,
+      async () => {
+        await this.reply(chatId, AI_BUSY_REPLY);
+        return null;
+      },
+      task,
+    );
   }
 
   private async handleCommand(user: DbUser, message: ZaloMessage, text: string): Promise<boolean> {
